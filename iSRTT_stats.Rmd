@@ -1,0 +1,283 @@
+---
+title: "Statisitcal Analysis for the manuscript titled Micro-offline gains do not drive implicit motor sequence learning"
+author: "Tharan Suresh"
+output: html_document
+date: "2026-07-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+
+rt_data <- read.csv("summary_SRTT_master_data.csv") %>%
+  mutate(SubjectID = factor(SubjectID),
+         Group = factor(Group),
+         Block = factor(as.integer(Block)))
+
+# ============================================================
+# Subject counts per Group x Task
+# ============================================================
+
+rt_data %>%
+  distinct(SubjectID, Group, Task) %>%
+  count(Group, Task)
+
+```
+
+
+```{r}
+# ============================================================
+# 1. MEAN RT -- ACQUISITION
+# ============================================================
+
+rt_acq <- rt_data %>% filter(Task == "Acquisition")
+
+rt_acq_mod <- lmer(Mean.RT. ~ Group * Block + (1|SubjectID), data = rt_acq)
+anova(rt_acq_mod)
+
+# Compute Group comparisons at every block, then filter to the ones of interest
+rt_acq_emm <- emmeans(rt_acq_mod, ~ Group | Block)
+rt_acq_ph <- pairs(rt_acq_emm) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("2", "8", "13", "14")) %>%
+  mutate(p.adj.bonf = p.adjust(p.value, method = "holm"))
+rt_acq_ph
+
+rt_acq_es <- eff_size(rt_acq_emm, sigma = sigma(rt_acq_mod), edf = df.residual(rt_acq_mod)) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("2", "8", "13", "14"))
+rt_acq_es
+
+
+# ============================================================
+# 2. MEAN RT -- RETENTION
+# ============================================================
+
+rt_ret <- rt_data %>% filter(Task == "Retention")
+
+rt_ret_mod <- lmer(Mean.RT. ~ Group * Block + (1|SubjectID), data = rt_ret)
+anova(rt_ret_mod)
+
+rt_ret_emm <- emmeans(rt_ret_mod, ~ Group | Block)
+rt_ret_ph <- pairs(rt_ret_emm) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("1", "2")) %>%
+  mutate(p.adj.bonf = p.adjust(p.value, method = "holm"))
+rt_ret_ph
+
+rt_ret_es <- eff_size(rt_ret_emm, sigma = sigma(rt_ret_mod), edf = df.residual(rt_ret_mod)) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("1", "2"))
+rt_ret_es
+
+
+# ============================================================
+# 3. SPEED -- ACQUISITION
+# ============================================================
+
+speed_data <- read.csv("summary_SRTT_speed_data.csv") %>%
+  mutate(SubjectID = factor(SubjectID),
+         Group = factor(Group),
+         Block = factor(as.integer(Block)))
+
+sp_acq <- speed_data %>%  filter(Task == "Acquisition")
+
+sp_acq_mod <- lmer(mean_speed ~ Group * Block + (1|SubjectID), data = sp_acq)
+anova(sp_acq_mod)
+
+sp_acq_emm <- emmeans(sp_acq_mod, ~ Group | Block)
+sp_acq_ph <- pairs(sp_acq_emm) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("2", "8", "13", "14")) %>%
+  mutate(p.adj.bonf = p.adjust(p.value, method = "holm"))
+sp_acq_ph
+
+sp_acq_es <- eff_size(sp_acq_emm, sigma = sigma(sp_acq_mod), edf = df.residual(sp_acq_mod)) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("2", "8", "13", "14"))
+sp_acq_es
+
+
+# ============================================================
+# 4. SPEED -- RETENTION
+# ============================================================
+
+sp_ret <- speed_data %>% filter(Task == "Retention")
+
+sp_ret_mod <- lmer(mean_speed ~ Group * Block + (1|SubjectID), data = sp_ret)
+anova(sp_ret_mod)
+
+sp_ret_emm <- emmeans(sp_ret_mod, ~ Group | Block)
+sp_ret_ph <- pairs(sp_ret_emm) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("1", "2")) %>%
+  mutate(p.adj.bonf = p.adjust(p.value, method = "holm"))
+sp_ret_ph
+
+sp_ret_es <- eff_size(sp_ret_emm, sigma = sigma(sp_ret_mod), edf = df.residual(sp_ret_mod)) %>%
+  as.data.frame() %>%
+  filter(Block %in% c("1", "2"))
+sp_ret_es
+```
+
+
+```{r}
+# ============================================================
+# 5. CUMULATIVE DELTA SPEED
+# ============================================================
+
+seq2seq_data <- read.csv("SRTT_bonstrup_speed_seq2seq_all.csv") %>%
+  mutate(SubjectID = factor(SubjectID),
+         Group = factor(Group),
+         transition_index = factor(transition_index))
+
+# ---- Acquisition ----
+cum_acq <- seq2seq_data %>% filter(Task == "Acquisition")
+
+cum_speed_acq_mod <- lmer(cum_speed ~ Group * transition_index + (1|SubjectID), data = cum_acq)
+anova(cum_speed_acq_mod)
+
+# ---- Retention ----
+cum_ret <- seq2seq_data %>% filter(Task == "Retention")
+
+cum_ret_mod <- lmer(cum_speed ~ Group * transition_index + (1|SubjectID), data = cum_ret)
+anova(cum_ret_mod)
+
+```
+
+
+```{r}
+# ============================================================
+# 6. BETWEEN-GROUP COMPARISONS
+# ============================================================
+
+# Pooled-SD Cohen's d for two independent samples (Sequence - Random)
+cohen_d <- function(x, y) {
+  nx <- length(x); ny <- length(y)
+  s_pooled <- sqrt(((nx - 1) * var(x) + (ny - 1) * var(y)) / (nx + ny - 2))
+  (mean(x) - mean(y)) / s_pooled
+}
+
+# Compare one metric between groups, separately for each Task
+group_compare <- function(df, value) {
+  df %>%
+    group_by(Task) %>%
+    group_modify(~{
+      seq_vals <- .x[[value]][.x$Group == "Sequence"]
+      ran_vals <- .x[[value]][.x$Group == "Random"]
+      tt <- t.test(seq_vals, ran_vals)
+      tibble(
+        n_seq    = length(seq_vals),
+        n_ran    = length(ran_vals),
+        mean_seq = mean(seq_vals),
+        mean_ran = mean(ran_vals),
+        t        = unname(tt$statistic),
+        df       = unname(tt$parameter),
+        p.value  = tt$p.value,
+        cohen_d  = cohen_d(seq_vals, ran_vals)
+      )
+    }) %>%
+    ungroup()
+}
+
+# ---- Skill (mean RT-based) ----
+skill_data <- read.csv("SRTT_skill_metric_all.csv")
+group_compare(skill_data, "skill")
+
+speed_data_means <- read.csv("SRTT_skill_speed_metric_all.csv")
+group_compare(speed_data_means, "skill_speed")
+
+
+summed_gains <- read.csv("SRTT_seq2seq_summed_gains_all.csv")
+
+group_compare(summed_gains, "summed_micro_online")
+
+group_compare(summed_gains, "summed_micro_offline")
+
+group_compare(summed_gains, "summed_total_speed")
+```
+
+
+```{r}
+# ============================================================
+# 7. RELATIONSHIPS: skill vs cumulative micro gains
+# ============================================================
+
+corr_data <- read.csv("SRTT_acquisition_gain_skill_correlations.csv") %>%
+  mutate(Group = factor(Group))
+
+
+# Correlate columns x and y within each Group
+group_corr <- function(df, x, y) {
+  df %>%
+    group_by(Group) %>%
+    group_modify(~{
+      ct <- cor.test(.x[[x]], .x[[y]])
+      tibble(
+        n       = nrow(.x),
+        r       = unname(ct$estimate),
+        t       = unname(ct$statistic),
+        df      = unname(ct$parameter),
+        p.value = ct$p.value
+      )
+    }) %>%
+    ungroup()
+}
+
+# Fig 3A: Acquisition skill vs cumulative micro-online gains
+group_corr(corr_data, "skill_acquisition", "summed_micro_online_acquisition")
+
+# Fig 3B: Acquisition skill vs cumulative micro-offline gains
+group_corr(corr_data, "skill_acquisition", "summed_micro_offline_acquisition")
+
+# Fig 3C: Retention skill vs cumulative micro-online gains
+group_corr(corr_data, "skill_retention", "summed_micro_online_acquisition")
+
+# Fig 3D: Retention skill vs cumulative micro-offline gains
+group_corr(corr_data, "skill_retention", "summed_micro_offline_acquisition")
+
+```
+
+```{r}
+# ============================================================
+# 8. IMPLICIT SEQUENCE KNOWLEDGE -- PDP (inclusion / exclusion scores)
+#    group 1 = Sequence, group 2 = No-sequence.
+# ============================================================
+
+
+std.error <- function(x, na.rm = TRUE) {
+  if (na.rm) x <- x[!is.na(x)]
+  sd(x) / sqrt(length(x))
+}
+
+pdp <- read.csv("SRTT_PDP.csv")
+
+pdp_learn   <- subset(pdp, group == 1)   # Sequence group
+pdp_nolearn <- subset(pdp, group == 2)   # No-Sequence group
+
+# ---- Sequence group ----
+mean(pdp_learn$inclusion, na.rm = TRUE)
+std.error(pdp_learn$inclusion, na.rm = TRUE)
+t.test(pdp_learn$inclusion, mu = 4)
+
+
+mean(pdp_learn$exclusion, na.rm = TRUE)
+std.error(pdp_learn$exclusion, na.rm = TRUE)
+t.test(pdp_learn$exclusion, mu = 8, na.rm = TRUE)
+
+# ---- No-Sequence group ----
+mean(pdp_nolearn$inclusion, na.rm = TRUE)
+std.error(pdp_nolearn$inclusion, na.rm = TRUE)
+t.test(pdp_nolearn$inclusion, mu = 4)
+
+mean(pdp_nolearn$exclusion, na.rm = TRUE)
+std.error(pdp_nolearn$exclusion, na.rm = TRUE)
+t.test(pdp_nolearn$exclusion, mu = 8)
+```
